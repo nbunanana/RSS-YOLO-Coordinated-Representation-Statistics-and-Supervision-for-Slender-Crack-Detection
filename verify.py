@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""自检：构建论文的三条实验臂，核对参数量与一次前向。
+"""Self-check: build the configurations used in the paper and verify parameter counts and one forward pass.
 
-用法（在 code/ 目录下，且 overlay 已覆盖到 ultralytics）：
+Usage (from the code/ directory, with the overlay already applied to ultralytics):
     python verify.py
 
-期望输出三个参数量：3,011,715 / 3,264,483 / 3,264,483。
-若与本目录 README 第 8 节不一致，说明 overlay 未正确覆盖或版本不符。
+Expected parameter counts: 3,011,715 / 3,264,483 / 3,264,483.
+A mismatch with Section 8 of the README in this directory means the overlay is not applied correctly or the versions differ.
 """
 import sys
 from pathlib import Path
@@ -14,9 +14,9 @@ import torch
 
 CFG = Path(__file__).resolve().parent / "configs"
 EXPECT = {
-    "yolov8-ema-crack-nodup.yaml": 3_011_715,      # 部署形态：Detect 头
-    "yolov8-ema-crack-nodup-seg.yaml": 3_264_483,  # 训练形态：Segment 头 + 掩膜分支
-    "yolov8-ema-only-seg.yaml": 3_264_483,         # 去 GN 对照臂
+    "yolov8-ema-crack-nodup.yaml": 3_011_715,      # deployment form: Detect head
+    "yolov8-ema-crack-nodup-seg.yaml": 3_264_483,  # training form: Segment head with mask branch
+    "yolov8-ema-only-seg.yaml": 3_264_483,         # control configuration without GN
 }
 
 
@@ -35,14 +35,14 @@ def main() -> int:
         flag = "OK " if params == expect else "FAIL"
         if params != expect:
             ok = False
-        print(f"  [{flag}] {name:36s} params={params:,} (期望 {expect:,}) forward={shape}")
+        print(f"  [{flag}] {name:36s} params={params:,} (expected {expect:,}) forward={shape}")
 
-    # 关键构件可用性
+    # availability of the key building blocks
     from ultralytics.nn.modules import C2f_EMA, C2f_GN
     from ultralytics.utils.loss import v8SegmentationLoss  # noqa: F401
 
-    print("  C2f_EMA / C2f_GN / v8SegmentationLoss 导入正常")
-    print("\n全部通过" if ok else "\n存在不一致，请检查 overlay 覆盖路径与 ultralytics 版本")
+    print("  C2f_EMA / C2f_GN / v8SegmentationLoss imported successfully")
+    print("\nall checks passed" if ok else "\ninconsistency found, check the overlay path and the ultralytics version")
     return 0 if ok else 1
 
 

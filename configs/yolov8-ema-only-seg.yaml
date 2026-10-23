@@ -1,14 +1,14 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-# 消融对照：**EMA(仅 P3) + 掩膜辅助监督，去掉 GN**。
-# 与 yolov8-ema-crack-nodup-seg.yaml **逐行同构**，唯一改动：层 12/18/21 的 `C2f_GN` → `C2f`（P4/P5 回到标准 BN）。
-# 目的：核对去掉 GN 后，掩膜 + EMA 的组合效果是否保持。
-#   CRACK_SEG_W=1.0 → EMA + 掩膜（本臂）
-#   CRACK_SEG_W=0   → 仅 EMA（对照；与本臂**参数量逐位一致**）
-# 对照关系：
-#   两臂之差 → 本家族内的【掩膜】效应
-# 对照用途：与含 GN 的配方比较，用于判断 GN 的贡献（同 seed 配对比较）。
-# 公平性（§5.3）：所有对照配置统一 pretrained=yolov8n.pt；box 指标一律 DetectionValidator 口径。
+# Ablation control: **EMA (P3 only) plus mask auxiliary supervision, with GN removed**.
+# Structurally identical **line by line** to yolov8-ema-crack-nodup-seg.yaml, with a single change: `C2f_GN` at layers 12/18/21 becomes `C2f` (P4/P5 revert to standard BN).
+# Purpose: to check whether the combined effect of the mask loss and EMA is retained once GN is removed.
+#   CRACK_SEG_W=1.0 -> EMA + mask (this configuration)
+#   CRACK_SEG_W=0   -> EMA only (control; **bit-identical parameter count** to this configuration)
+# Control relationships:
+#   the difference between the two configurations -> the effect of the mask term within this family
+# Use of the control: comparison with the GN-containing recipe, used to judge the contribution of GN (paired comparison with matched seeds).
+# Fairness (Section 5.3 of the paper): all control configurations use pretrained=yolov8n.pt; box metrics are always reported in the DetectionValidator convention.
 # Model docs: https://docs.ultralytics.com/models/yolov8
 # Task docs: https://docs.ultralytics.com/tasks/segment
 
@@ -36,22 +36,22 @@ backbone:
   - [-1, 3, C2f, [1024, True]] # 8
   - [-1, 1, SPPF, [1024, 5]] # 9
 
-# YOLOv8.0n head: P3 用 EMA；P4/P5 用**标准 C2f（BN）**（相对三组件版去掉了 GN）
+# YOLOv8.0n head: P3 uses EMA; P4/P5 use **standard C2f (BN)** (GN is removed relative to the three-component variant)
 head:
   - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 10
-  - [[10, 6], 1, Concat, [1]] # 11 cat backbone P4（显式绝对索引）
-  - [-1, 3, C2f, [512]] # 12  ← 原 C2f_GN，现为标准 C2f
+  - [[10, 6], 1, Concat, [1]] # 11 cat backbone P4 (explicit absolute index)
+  - [-1, 3, C2f, [512]] # 12  previously C2f_GN, now standard C2f
 
   - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 13
-  - [[13, 4], 1, Concat, [1]] # 14 cat backbone P3（显式绝对索引）
+  - [[13, 4], 1, Concat, [1]] # 14 cat backbone P3 (explicit absolute index)
   - [-1, 3, C2f_EMA, [256]] # 15 (P3/8-small) - EMA only
 
   - [-1, 1, Conv, [256, 3, 2]] # 16
-  - [[16, 12], 1, Concat, [1]] # 17 cat head P4（显式绝对索引）
-  - [-1, 3, C2f, [512]] # 18 (P4/16-medium) ← 原 C2f_GN，现为标准 C2f
+  - [[16, 12], 1, Concat, [1]] # 17 cat head P4 (explicit absolute index)
+  - [-1, 3, C2f, [512]] # 18 (P4/16-medium) previously C2f_GN, now standard C2f
 
   - [-1, 1, Conv, [512, 3, 2]] # 19
-  - [[19, 9], 1, Concat, [1]] # 20 cat head P5（显式绝对索引）
-  - [-1, 3, C2f, [1024]] # 21 (P5/32-large) ← 原 C2f_GN，现为标准 C2f
+  - [[19, 9], 1, Concat, [1]] # 20 cat head P5 (explicit absolute index)
+  - [-1, 3, C2f, [1024]] # 21 (P5/32-large) previously C2f_GN, now standard C2f
 
-  - [[15, 18, 21], 1, Segment, [nc, 32, 256]] # Segment(P3, P4, P5)；proto 取 P3（CRACK_PROTO_LVL=0）
+  - [[15, 18, 21], 1, Segment, [nc, 32, 256]] # Segment(P3, P4, P5); proto is taken from P3 (CRACK_PROTO_LVL=0)

@@ -12,14 +12,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.init import constant_, xavier_uniform_
 
-# ---- Segment 头 proto 取尺度的环境变量开关（裂缝分割消融实验用；默认 0，行为与原版完全一致）----
-#   背景：4 尺度 Segment（P2,P3,P4,P5）时 `Proto(ch[0], ...)` 会取到 P2（stride 4）特征，
-#   proto 输出分辨率翻倍、显存约 ×4；而 3 尺度 Segment 的 proto 取自 P3。
-#   为使 3 尺度与 4 尺度配置的 proto 输入通道/输出分辨率/参数量完全一致，
-#   把 proto 的“构造通道”与“调用输入”绑定到同一个尺度索引：
-#     CRACK_PROTO_LVL = 0 → 取 x[0]（默认，3 尺度下即 P3；等价原行为）
-#     CRACK_PROTO_LVL = 1 → 取 x[1]（4 尺度下即 P3）
-#   注意：构造处（__init__）与调用处（forward）必须同源，否则 Conv2d 通道不匹配直接报错。
+# ---- Environment switch for the proto level of the Segment head (for crack-segmentation ablation studies; defaults to 0, upstream behaviour) ----
+#   Background: with a 4-level Segment head (P2, P3, P4, P5), `Proto(ch[0], ...)` takes P2 (stride 4) features,
+#   so the proto output resolution doubles and memory use roughly quadruples, while a 3-level head takes proto from P3.
+#   To keep proto input channels, output resolution and parameter count identical between the 3-level and
+#   4-level configurations, the proto construction channels and the forward input share one level index:
+#     CRACK_PROTO_LVL = 0 reads x[0] (default; P3 under a 3-level head, equivalent to upstream behaviour)
+#     CRACK_PROTO_LVL = 1 reads x[1] (P3 under a 4-level head)
+#   Note: construction in __init__ and the call in forward must use the same source, or Conv2d raises a channel mismatch error.
 CRACK_PROTO_LVL = int(os.environ.get("CRACK_PROTO_LVL", "0"))
 
 from ultralytics.utils import NOT_MACOS14

@@ -38,28 +38,28 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
     return p
 
 
-# ---- 全局归一化开关（消融实验用；默认 bn，行为与原版完全一致）----
-#   CRACK_NORM=bn  BatchNorm2d(c)                    依赖 batch statistics
-#   CRACK_NORM=gn  GroupNorm(min(32, c), c)          不依赖 batch，按通道分组
-#   CRACK_NORM=in  InstanceNorm2d(c, affine=True)    不依赖 batch，每通道一组
+# ---- Global normalisation switch (for ablation studies; defaults to bn and keeps upstream behaviour) ----
+#   CRACK_NORM=bn  BatchNorm2d(c)                    relies on batch statistics
+#   CRACK_NORM=gn  GroupNorm(min(32, c), c)          independent of batch, groups channels
+#   CRACK_NORM=in  InstanceNorm2d(c, affine=True)    independent of batch, one group per channel
 #
-# 三种方案的参数量完全相同（都是 2c：weight c + bias c），所以 BN/GN/IN 的对比
-# 不掺杂参数量变量。GN 的组数沿用本项目既有 Conv_GN 的约定 min(32, c)。
+# All three options carry the same parameter count (2c in every case: weight c plus bias c), so the BN/GN/IN
+# comparison does not vary the parameter count. GN group count follows the existing min(32, c) Conv_GN convention.
 #
-# 注意：GN/IN 无法折叠进卷积权重，因此 nn/tasks.py 的 fuse() 里加了守卫，
-# 只折叠真正的 BatchNorm。
+# Note: GN/IN cannot be folded into the convolution weights, so fuse() in nn/tasks.py guards the operation
+# and folds true BatchNorm layers only.
 CRACK_NORM = os.environ.get("CRACK_NORM", "bn").lower()
 
 
 def build_norm(c: int) -> nn.Module:
-    """按 CRACK_NORM 构造归一化层，参数量恒为 2c。"""
+    """Build the normalisation layer configured by CRACK_NORM, always with a parameter count of 2c."""
     if CRACK_NORM == "bn":
         return nn.BatchNorm2d(c)
     if CRACK_NORM == "gn":
         return nn.GroupNorm(min(32, c), c)
     if CRACK_NORM == "in":
         return nn.InstanceNorm2d(c, affine=True)
-    raise ValueError(f"CRACK_NORM 只支持 'bn' / 'gn' / 'in'，收到 {CRACK_NORM!r}")
+    raise ValueError(f"CRACK_NORM supports 'bn' / 'gn' / 'in' only, got {CRACK_NORM!r}")
 
 
 class Conv(nn.Module):
@@ -89,7 +89,7 @@ class Conv(nn.Module):
         """
         super().__init__()
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
-        self.bn = build_norm(c2)  # 默认 BatchNorm2d；由 CRACK_NORM 决定 BN/GN/IN
+        self.bn = build_norm(c2)  # defaults to BatchNorm2d; CRACK_NORM selects BN/GN/IN
         self.act = self.default_act if act is True else act if isinstance(act, nn.Module) else nn.Identity()
 
     def forward(self, x):

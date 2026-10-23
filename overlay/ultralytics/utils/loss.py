@@ -20,36 +20,36 @@ from ultralytics.utils.torch_utils import autocast
 from .metrics import bbox_iou, probiou
 from .tal import bbox2dist, rbox2dist
 
-# 裂缝检测消融实验开关：回归损失使用的 IoU 类型。
-# 由环境变量 CRACK_IOU 控制，取值 "siou"（默认，本项目的改进配置）或 "ciou"（YOLOv8 原始基线）。
-# 目的是切换回归损失时无需修改源码，保证消融实验各配置之间只差一个变量、且可完整复现。
+# Crack detection ablation switch: IoU type used by the regression loss.
+# Controlled by the CRACK_IOU environment variable, "siou" (the improved configuration of this work) or "ciou" (the original YOLOv8 baseline).
+# Switching the regression loss then needs no source edit, so ablation configurations differ by a single variable and stay fully reproducible.
 CRACK_IOU = os.environ.get("CRACK_IOU", "siou").strip().lower()
 if CRACK_IOU not in {"ciou", "siou"}:
     raise ValueError(f'CRACK_IOU only supports "ciou" or "siou", but got {CRACK_IOU!r}')
 
-# 裂缝检测消融实验开关：**掩膜/语义监督项的权重**（无掩膜对照用）。
-#   背景：v8SegmentationLoss 里掩膜损失 `loss[1] *= self.hyp.box` 与框回归损失
-#   `loss[0] *= self.hyp.box` **共用同一个超参 hyp.box**。因此"把 mask 权重置 0"若实现为
-#   hyp.box = 0，会同时把框回归损失清零——那就不是"同框监督、仅断开掩膜"的对照臂了。
-#   故单独开一个只作用于掩膜（loss[1]，本数据集无语义分支）与语义项（loss[4]）的系数：
-#     CRACK_SEG_W = 1.0（默认）→ 行为与原版完全一致；
-#     CRACK_SEG_W = 0   → 无掩膜对照：仅断开掩膜监督，框/分类/DFL 监督逐位不变。
-#   代价（须披露）：proto/cv4 仍参与前向（只带来显存与耗时开销），但其梯度恒为 0。
+# Crack detection ablation switch: **weight of the mask/semantic supervision terms** (for the no-mask control).
+#   Background: in v8SegmentationLoss the mask loss `loss[1] *= self.hyp.box` and the box regression loss `loss[0] *=`
+#   self.hyp.box` **share the same hyperparameter hyp.box**, so implementing "mask weight = 0" as hyp.box = 0 would also
+#   zero the box regression loss and is therefore not a control with identical box supervision and only the mask branch
+#   disconnected. A coefficient is applied only to the mask term (loss[1]; no semantic branch here) and to loss[4]:
+#     CRACK_SEG_W = 1.0 (default) reproduces the original behaviour exactly;
+#     CRACK_SEG_W = 0   gives the no-mask control: only mask supervision is disconnected, box/cls/DFL supervision is unchanged.
+#   Cost (to be disclosed): proto/cv4 still take part in the forward pass (memory and time only), but their gradients stay 0.
 CRACK_SEG_W = float(os.environ.get("CRACK_SEG_W", "1.0"))
 
-# 裂缝检测消融实验开关：**错位对照：掩膜-实例错配**。
-#   动机：把"掩膜辅助监督的增益来自**掩膜与实例的正确对应**"与"**仅仅来自额外的优化动力学/正则**"
-#   区分开（对照形式类比 shuffled-label 控制）。打乱对照臂应与正式臂在**参数量/GFLOPs/loss 项结构/梯度通路**
-#   上完全一致，唯一差异是"哪张图的预测去和哪张图真值算 mask loss"。
-#   语义：CRACK_SEG_SHUFFLE=1 时，把送进掩膜损失的**预测掩膜 ↔ 真值掩膜/实例**对应关系在 batch 内打乱
-#   （按 batch 维 permute 预测侧 pred_masks / proto），其余一切完全不变：
-#     * 掩膜分支仍前向、仍反向；loss[1] 项仍存在且权重仍为 CRACK_SEG_W（**不置零、梯度不为零**）；
-#     * 真值侧（masks / target_bboxes / target_gt_idx，即 GT 及其分配）保持原位；
-#     * perm 无不动点 ⇒ batch 内每个样本都与"别人的"真值配对（不与自身配对）。
-#   与 CRACK_SEG_W 正交：CRACK_SEG_W=0 仍是零梯度的无掩膜对照臂，**不受本开关影响**（保持既有结论可复现）。
-#   实现位置：v8SegmentationLoss.calculate_segmentation_loss（仅对 batch 维 permute，形状守恒）。
-#   随机性：由 criterion 自带的 torch.Generator 产生（不消耗全局 RNG，避免扰动其它随机流）；
-#           种子可用 CRACK_SEG_SHUFFLE_SEED 指定（默认 0），保证逐次前向可复现。
+# Crack detection ablation switch: **shuffled control: mask-instance mismatch**.
+#   Motivation: separate the gain from **correct pairing of masks with instances** from the gain from **extra optimisation
+#   dynamics or regularisation** (analogous to a shuffled-label control). The shuffled control configuration must match the
+#   primary configuration in **parameter count/GFLOPs/loss term structure/gradient path**, differing only in the pairing.
+#   Semantics: with CRACK_SEG_SHUFFLE=1 the correspondence between **predicted masks and ground truth masks/instances**
+#   entering the mask loss is shuffled within the batch (pred_masks / proto permuted on the batch dimension); all else is unchanged:
+#     * the mask branch still runs forward and backward; loss[1] is kept with weight CRACK_SEG_W (**not zeroed, gradients non-zero**);
+#     * the target side (masks / target_bboxes / target_gt_idx, that is the ground truth and its assignment) stays in place;
+#     * the permutation has no fixed point, so every sample is paired with the ground truth of another sample in the batch.
+#   Orthogonal to CRACK_SEG_W: CRACK_SEG_W=0 is still the zero-gradient no-mask control and is **unaffected by this switch**.
+#   Implementation: v8SegmentationLoss.calculate_segmentation_loss (batch dimension only, shape preserving).
+#   Randomness: from a torch.Generator owned by the criterion (global RNG untouched, other random streams unperturbed);
+#               the permutation seed is set with CRACK_SEG_SHUFFLE_SEED (default 0), so forward passes are reproducible.
 CRACK_SEG_SHUFFLE = int(os.environ.get("CRACK_SEG_SHUFFLE", "0"))
 
 class VarifocalLoss(nn.Module):
@@ -537,9 +537,9 @@ class v8SegmentationLoss(v8DetectionLoss):
         super().__init__(model, tal_topk, tal_topk2)
         self.overlap = model.args.overlap_mask
         self.bcedice_loss = BCEDiceLoss(weight_bce=0.5, weight_dice=0.5)
-        # 错位对照（掩膜-实例错配）：独立于全局 RNG 的可复现置换发生器，避免扰动其它随机流
-        # （从而保证与正式臂的唯一差异只有"预测掩膜↔真值实例"的对应关系）。
-        # CRACK_SEG_SHUFFLE_SEED 可显式指定，便于复现同一组置换序列。
+        # Shuffled control (mask-instance mismatch): a reproducible permutation generator independent of the global RNG,
+        # so other random streams are not perturbed (the only difference from the primary configuration is then the
+        # predicted mask to ground truth instance correspondence). CRACK_SEG_SHUFFLE_SEED fixes the permutation sequence.
         self.seg_shuffle = CRACK_SEG_SHUFFLE == 1
         self._seg_shuffle_gen = torch.Generator(device=self.device)
         self._seg_shuffle_gen.manual_seed(int(os.environ.get("CRACK_SEG_SHUFFLE_SEED", "0")))
@@ -602,7 +602,7 @@ class v8SegmentationLoss(v8DetectionLoss):
             if pred_semantic is not None:
                 loss[4] += (pred_semantic * 0).sum()
 
-        loss[1] *= self.hyp.box * CRACK_SEG_W  # seg gain（CRACK_SEG_W=0 即无掩膜对照臂）
+        loss[1] *= self.hyp.box * CRACK_SEG_W  # seg gain (CRACK_SEG_W=0 gives the no-mask control)
         return loss * batch_size, loss.detach()  # loss(box, seg, cls, dfl, semantic)
 
     @staticmethod
@@ -630,43 +630,43 @@ class v8SegmentationLoss(v8DetectionLoss):
         return (crop_mask(loss, xyxy).mean(dim=(1, 2)) / area).sum()
 
     def _seg_shuffle_perm(self, bs: int, masks: torch.Tensor, batch_idx: torch.Tensor):
-        """错位对照（`CRACK_SEG_SHUFFLE=1`）的 batch 维**错配置换**；不满足条件时返回 None（fail-safe）。
+        """Batch dimension **mismatch permutation** for the shuffled control (`CRACK_SEG_SHUFFLE=1`); returns None if not applicable (fail-safe).
 
-        返回 perm 后，调用方执行 ``pred_masks = pred_masks[perm]; proto = proto[perm]``：
-        第 i 张图的真值（masks / target_bboxes / target_gt_idx 均保持原位）改与第 ``perm[i]`` 张图的
-        **预测掩膜**配对，即"哪张图的预测去和哪张图真值算 mask loss"被错配；其余（参数量/GFLOPs/
-        损失项结构/梯度通路/loss[1] 权重）完全不变。perm 无不动点（perm[i] != i），保证 batch 内
-        **每个样本都被错配**、不与自身配对。
+        Once a perm is returned, the caller applies ``pred_masks = pred_masks[perm]; proto = proto[perm]``: the ground
+        truth of image i (masks / target_bboxes / target_gt_idx all stay in place) is then paired with the
+        **predicted masks** of image ``perm[i]``, so which image's predictions are used for which image's ground truth
+        in the mask loss is mismatched; everything else (parameter count/GFLOPs/loss term structure/gradient path/loss[1]
+        weight) is unchanged. The perm has no fixed point (perm[i] != i), so **every sample is mismatched** and never paired with itself.
 
-        fail-safe：若 batch 内无法建立一一对应（batch_size<=1，或 masks 的批/实例维与 batch_idx
-        不匹配），打印**一次**警告并退化为"不打乱"（返回 None），不静默出错。
+        fail-safe: if a one-to-one correspondence cannot be built within the batch (batch_size<=1, or the batch/instance
+        dimensions of masks do not match batch_idx), a warning is printed **once** and the function degrades to no shuffling (returns None) instead of failing silently.
         """
         if not self.seg_shuffle:
             return None
         reason = None
         if bs <= 1:
-            reason = f"batch_size={bs}（无法在 batch 内错配）"
+            reason = f"batch_size={bs} (no mismatch possible within the batch)"
         elif not torch.is_tensor(masks) or masks.dim() < 3:
-            reason = f"masks 形状 {None if not torch.is_tensor(masks) else tuple(masks.shape)} 无法按图像索引"
+            reason = f"masks shape {None if not torch.is_tensor(masks) else tuple(masks.shape)} cannot be indexed by image"
         elif self.overlap and masks.shape[0] != bs:
-            reason = f"overlap=True 时 masks.shape[0]={masks.shape[0]} != batch_size={bs}"
+            reason = f"with overlap=True, masks.shape[0]={masks.shape[0]} != batch_size={bs}"
         elif not self.overlap and masks.shape[0] != batch_idx.view(-1).numel():
-            reason = (f"overlap=False 时 masks.shape[0]={masks.shape[0]} != "
-                      f"batch_idx 条目数={batch_idx.view(-1).numel()}")
+            reason = (f"with overlap=False, masks.shape[0]={masks.shape[0]} != "
+                      f"{batch_idx.view(-1).numel()} batch_idx entries")
         if reason is not None:
             if not self._seg_shuffle_warned:
                 LOGGER.warning(
-                    f"CRACK_SEG_SHUFFLE=1 但本 batch 无法打乱掩膜-实例对应（{reason}）→ "
-                    f"退化为不打乱（fail-safe）；后续同类情形不再重复提示。")
+                    f"CRACK_SEG_SHUFFLE=1 but this batch cannot shuffle the mask-instance correspondence ({reason}); "
+                    f"falling back to no shuffling (fail-safe); further occurrences of this case are not reported again.")
                 self._seg_shuffle_warned = True
             return None
         perm = torch.randperm(bs, generator=self._seg_shuffle_gen, device=self.device)
-        for i in range(bs):  # 消除不动点：与下一位置互换，保证每个样本都与"别人的"真值配对
+        for i in range(bs):  # remove fixed points: swap with the next slot so every sample is paired with another sample's ground truth
             if int(perm[i]) == i:
                 j = (i + 1) % bs
                 perm[i] = int(perm[j])
                 perm[j] = i
-        if bool((perm == torch.arange(bs, device=self.device)).any()):  # 兜底：必无不动点
+        if bool((perm == torch.arange(bs, device=self.device)).any()):  # fallback: guaranteed to have no fixed point
             perm = (torch.arange(bs, device=self.device) + 1) % bs
         return perm
 
@@ -704,9 +704,9 @@ class v8SegmentationLoss(v8DetectionLoss):
         _, _, mask_h, mask_w = proto.shape
         loss = 0
 
-        # 错位对照（CRACK_SEG_SHUFFLE=1）：把"预测掩膜 ↔ 真值掩膜/实例"的对应关系在 batch 内错配。
-        # 仅对**预测侧**（pred_masks / proto）按 batch 维 permute：形状守恒、梯度通路不变；
-        # 真值侧（masks / target_bboxes / target_gt_idx，即 GT 及其匹配分配）保持原位。
+        # Shuffled control (CRACK_SEG_SHUFFLE=1): mismatch the predicted mask to ground truth mask/instance pairing in the batch.
+        # Only the **prediction side** (pred_masks / proto) is permuted on the batch dimension: shapes are preserved, the gradient path is unchanged;
+        # the target side (masks / target_bboxes / target_gt_idx, that is the ground truth and its assignment) stays in place.
         seg_shuffle_perm = self._seg_shuffle_perm(pred_masks.shape[0], masks, batch_idx)
         if seg_shuffle_perm is not None:
             pred_masks = pred_masks[seg_shuffle_perm]

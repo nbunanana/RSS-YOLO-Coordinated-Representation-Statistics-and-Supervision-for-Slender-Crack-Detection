@@ -247,9 +247,9 @@ class BaseModel(torch.nn.Module):
         """
         if not self.is_fused():
             for m in self.model.modules():
-                # 只有真正的 BatchNorm 才能折叠进卷积权重。CRACK_NORM=gn/in 时
-                # Conv.bn 是 GroupNorm/InstanceNorm，没有 running_mean/running_var，
-                # 强行折叠会 AttributeError，且数学上也不可折叠。
+                # Only true BatchNorm layers fold into the convolution weights. With CRACK_NORM=gn/in,
+                # Conv.bn is a GroupNorm/InstanceNorm without running_mean/running_var, so folding
+                # raises AttributeError and is mathematically invalid as well.
                 if isinstance(m, (Conv, Conv2, DWConv)) and isinstance(
                     getattr(m, "bn", None), nn.modules.batchnorm._BatchNorm
                 ):

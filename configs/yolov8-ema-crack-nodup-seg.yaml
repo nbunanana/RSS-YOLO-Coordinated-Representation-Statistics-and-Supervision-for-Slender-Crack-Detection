@@ -1,17 +1,17 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-# 本臂 = EMA+GN 检测配方 + 掩膜辅助监督：Neck 结构与 yolov8-ema-crack-nodup.yaml 逐层一致，
-# 仅把最后的 Detect 替换为 Segment（[nc, 32, 256]），即新增 cv4 掩膜系数分支与 proto 原型分支，
-# 损失侧由 v8SegmentationLoss 增加掩膜监督项（框/分类损失不变）。
+# This configuration combines the EMA+GN detection recipe with mask auxiliary supervision: the Neck structure matches yolov8-ema-crack-nodup.yaml layer by layer,
+# and only the final Detect is replaced by Segment ([nc, 32, 256]), which adds the cv4 mask coefficient branch and the proto prototype branch,
+# while on the loss side v8SegmentationLoss adds a mask supervision term (the box and classification losses are unchanged).
 #
-# proto 取值（head.py 的相应改动见 overlay/）：
-#   本 yaml 为 **3 尺度** Segment，proto 取自 x[0] = P3（c1 = 64）→ 用 CRACK_PROTO_LVL=0（默认）。
-#   若改用 4 尺度（P2 起）的 Segment 配置，需设 CRACK_PROTO_LVL=1 使 proto 仍取自 P3；
-#   该 4 尺度配置不属本代码包（非论文实验臂）。
+# proto source (the corresponding changes in head.py are given in overlay/):
+#   This yaml uses a **3-scale** Segment head, so proto is taken from x[0] = P3 (c1 = 64) and CRACK_PROTO_LVL=0 (the default) applies.
+#   For a 4-scale Segment configuration (starting at P2), CRACK_PROTO_LVL=1 is required so that proto is still taken from P3;
+#   that 4-scale configuration is not part of this code package and is not a configuration evaluated in the paper.
 #
-# 公平性（§5.3）：所有对照配置统一 pretrained=yolov8n.pt（禁止用 yolov8n-seg.pt）；
-#   box 指标一律用 DetectionValidator 口径；训练目标含掩膜损失，故本配方是"不同的训练机制"。
-# 掩膜权重置零的对照组复用本 yaml，以 CRACK_SEG_W=0 断开掩膜监督（不改 hyp.box，见 loss.py 注释）。
+# Fairness (Section 5.3 of the paper): all control configurations use pretrained=yolov8n.pt (yolov8n-seg.pt is not permitted);
+#   box metrics are always reported in the DetectionValidator convention; the training objective includes the mask loss, so this recipe follows a different training regime.
+# The control configuration with the mask weight set to zero reuses this yaml and disables mask supervision with CRACK_SEG_W=0 (hyp.box is not modified; see the comments in loss.py).
 # Model docs: https://docs.ultralytics.com/models/yolov8
 # Task docs: https://docs.ultralytics.com/tasks/segment
 
@@ -25,7 +25,7 @@ scales: # model compound scaling constants, i.e. 'model=yolov8n-seg.yaml' will c
   l: [1.00, 1.00, 512]
   x: [1.00, 1.25, 512]
 
-# YOLOv8.0n backbone (keep BatchNorm) —— 与 yolov8-ema-crack-nodup.yaml 逐行相同
+# YOLOv8.0n backbone (keep BatchNorm), identical line by line to yolov8-ema-crack-nodup.yaml
 backbone:
   # [from, repeats, module, args]
   - [-1, 1, Conv, [64, 3, 2]] # 0-P1/2
@@ -39,22 +39,22 @@ backbone:
   - [-1, 3, C2f, [1024, True]] # 8
   - [-1, 1, SPPF, [1024, 5]] # 9
 
-# YOLOv8.0n head: P3 检测层用 EMA，P4/P5 检测层用 GN（Neck 内部与 nodup 完全一致）
+# YOLOv8.0n head: the P3 detection level uses EMA and the P4/P5 detection levels use GN (the Neck internals are identical to nodup)
 head:
   - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 10
-  - [[10, 6], 1, Concat, [1]] # 11 cat backbone P4（显式绝对索引）
+  - [[10, 6], 1, Concat, [1]] # 11 cat backbone P4 (explicit absolute index)
   - [-1, 3, C2f_GN, [512]] # 12
 
   - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 13
-  - [[13, 4], 1, Concat, [1]] # 14 cat backbone P3（显式绝对索引）
+  - [[13, 4], 1, Concat, [1]] # 14 cat backbone P3 (explicit absolute index)
   - [-1, 3, C2f_EMA, [256]] # 15 (P3/8-small)
 
   - [-1, 1, Conv, [256, 3, 2]] # 16
-  - [[16, 12], 1, Concat, [1]] # 17 cat head P4（显式绝对索引）
+  - [[16, 12], 1, Concat, [1]] # 17 cat head P4 (explicit absolute index)
   - [-1, 3, C2f_GN, [512]] # 18 (P4/16-medium)
 
   - [-1, 1, Conv, [512, 3, 2]] # 19
-  - [[19, 9], 1, Concat, [1]] # 20 cat head P5（显式绝对索引）
+  - [[19, 9], 1, Concat, [1]] # 20 cat head P5 (explicit absolute index)
   - [-1, 3, C2f_GN, [1024]] # 21 (P5/32-large)
 
-  - [[15, 18, 21], 1, Segment, [nc, 32, 256]] # Segment(P3, P4, P5)；proto 取 P3（CRACK_PROTO_LVL=0）
+  - [[15, 18, 21], 1, Segment, [nc, 32, 256]] # Segment(P3, P4, P5); proto is taken from P3 (CRACK_PROTO_LVL=0)
