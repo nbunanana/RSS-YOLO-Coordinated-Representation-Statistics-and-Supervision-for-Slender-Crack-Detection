@@ -1,0 +1,25 @@
+# Bytecode and caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Environments
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Data, weights and run outputs (never committed: this package ships logic only)
+datasets/
+runs/
+*.pt
+*.pth
+*.onnx
+*.log
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

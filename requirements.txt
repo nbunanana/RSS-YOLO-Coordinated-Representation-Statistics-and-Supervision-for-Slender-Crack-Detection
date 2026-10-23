@@ -1,4 +1,4 @@
-# RSS-YOLO 复现依赖（与论文实验环境一致）
+# Dependencies for reproducing RSS-YOLO (mirrors the environment used for the paper)
 # Python 3.11
 torch==2.11.0
 torchvision>=0.16
